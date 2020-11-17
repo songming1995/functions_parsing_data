@@ -62,12 +62,12 @@ int main(int argc, char** argv)
         right_image_path << dataset_folder << "sequences/" + sequence_number + "/image_1/" << std::setfill('0') << std::setw(6) << line_num << ".png";
         cv::Mat right_image = cv::imread(right_image_path.str(), CV_LOAD_IMAGE_GRAYSCALE);
 
-        sensor_msgs::PointCloud2 laser_cloud_msg;
-        laser_cloud_msg.header.stamp = ros::Time().fromSec(timestamp);
-        laser_cloud_msg.header.frame_id = "/camera_init";
+        sensor_msgs::Image image_msg;
+        image_msg.header.stamp = ros::Time().fromSec(timestamp);
+        image_msg.header.frame_id = "/camera_init";
 
-        sensor_msgs::ImagePtr image_left_msg = cv_bridge::CvImage(laser_cloud_msg.header, "mono8", left_image).toImageMsg();
-        sensor_msgs::ImagePtr image_right_msg = cv_bridge::CvImage(laser_cloud_msg.header, "mono8", right_image).toImageMsg();
+        sensor_msgs::ImagePtr image_left_msg = cv_bridge::CvImage(image_msg.header, "mono8", left_image).toImageMsg();
+        sensor_msgs::ImagePtr image_right_msg = cv_bridge::CvImage(image_msg.header, "mono8", right_image).toImageMsg();
 
 
         if (to_bag)
@@ -83,3 +83,4 @@ int main(int argc, char** argv)
 
     return 0;
 }
+
