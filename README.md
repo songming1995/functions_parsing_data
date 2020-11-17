@@ -1,2 +1,2 @@
-# leetcode_practice
-witness the C++ study 
+# Useful C ++ function for parsing data
+
