@@ -123,7 +123,7 @@ anim = animation.FuncAnimation(fig, animate, frames=len(x_v),
 #plt.legend(prop={'size': 10}, markerscale=15)
 #plt.show()
 
-anim.save('traj.mp4', writer=writer)
+anim.save('traj.mp4', writer=writer, dpi=500)
 
 
 
