@@ -1,0 +1,42 @@
+                    if(opti_counter == 1){
+                     //calculate the residuals
+                    ceres::Problem::EvaluateOptions EvalOpts;
+                    EvalOpts.apply_loss_function = false;
+                    EvalOpts.residual_blocks = psrIDs;
+                    std::vector<double> Residuals;
+                    problem.Evaluate(EvalOpts, nullptr, &Residuals, nullptr, nullptr);
+                    int num_res = problem.NumResiduals();
+                    int n_res = Residuals.size();
+                    std::cout<<"The number of residual error is:"<<num_res<<std::endl;
+                    std::cout<<"The number of residual error is:"<<n_res<<std::endl;
+                   // get the estimation covariance matrix to model the uncertainty
+                    ceres::Covariance::Options cov_options;
+                    ceres::Covariance covariance(cov_options);
+
+                    vector<pair<const double*, const double*> > covariance_blocks;
+                    covariance_blocks.push_back(make_pair(para_q, para_q));
+                    covariance_blocks.push_back(make_pair(para_t, para_t));
+
+                    CHECK(covariance.Compute(covariance_blocks, &problem));
+
+                    double covariance_qq[4 * 4];
+                    double covariance_tt[3 * 3];
+                    covariance.GetCovarianceBlock(para_q, para_q, covariance_qq);
+                    covariance.GetCovarianceBlock(para_t, para_t, covariance_tt);
+                    Eigen::Map<Eigen::Matrix4d> rotation_cov(covariance_qq);
+                    Eigen::Map<Eigen::Matrix3d> translation_cov(covariance_tt);
+                    if(covariance.GetCovarianceBlock(para_q, para_q, covariance_qq) && covariance.GetCovarianceBlock(para_t, para_t, covariance_tt))
+                    {
+                        std::cout<<"The covariance is estimated in frame: "<< frameCount<<std::endl;
+                        std::cout<<"The quaternion rotation covariance is estimated as: "<< rotation_cov<<std::endl;
+                        std::cout<<"The quaternion translation covariance is estimated as: "<< translation_cov<<std::endl;
+                        std::cout<<"---------------------------------"<<std::endl;
+
+                    }
+                    else
+                    {
+                        std::cout<<"The covariance fails to be estimated in frame: "<< frameCount<<std::endl;
+                        std::cout<<"---------------------------------"<<std::endl;
+                    }
+
+                }
