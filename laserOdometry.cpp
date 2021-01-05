@@ -1,6 +1,6 @@
 // This is an advanced implementation of the algorithm described in the following paper:
 //   J. Zhang and S. Singh. LOAM: Lidar Odometry and Mapping in Real-time.
-//     Robotics: Science and Systems Conference (RSS). Berkeley, CA, July 2014. 
+//     Robotics: Science and Systems Conference (RSS). Berkeley, CA, July 2014.
 
 // Modifier: Tong Qin               qintonguav@gmail.com
 // 	         Shaozu Cao 		    saozu.cao@connect.ust.hk
@@ -51,15 +51,29 @@
 #include <eigen3/Eigen/Dense>
 #include <mutex>
 #include <queue>
-
+#include <utility>
+#include <vector>
+#include <numeric>
 #include "aloam_velodyne/common.h"
 #include "aloam_velodyne/tic_toc.h"
 #include "lidarFactor.hpp"
+#include <iomanip>
+#include <unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
 
+/*#include <mrpt/poses/CPoint3D.h>
+#include <mrpt/poses/CPointPDFGaussian.h>
+#include <mrpt/poses/CPose3D.h>
+#include <mrpt/poses/CPoses2DSequence.h>
+#include <mrpt/system/CTicTac.h> */
+#include <iostream>
+using namespace std;
 #define DISTORTION 0
 
 
 int corner_correspondence = 0, plane_correspondence = 0;
+std::vector<ceres::ResidualBlockId> psrIDs;
 
 constexpr double SCAN_PERIOD = 0.1;
 constexpr double DISTANCE_SQ_THRESHOLD = 25;
@@ -67,6 +81,7 @@ constexpr double NEARBY_SCAN = 2.5;
 
 int skipFrameNum = 5;
 bool systemInited = false;
+int framenum =0;
 
 double timeCornerPointsSharp = 0;
 double timeCornerPointsLessSharp = 0;
@@ -89,15 +104,14 @@ pcl::PointCloud<PointType>::Ptr laserCloudFullRes(new pcl::PointCloud<PointType>
 int laserCloudCornerLastNum = 0;
 int laserCloudSurfLastNum = 0;
 
-// Lidar Odometry线程估计的frame在world坐标系的位姿P，Transformation from current frame to world frame
+// Transformation from current frame to world frame
 Eigen::Quaterniond q_w_curr(1, 0, 0, 0);
 Eigen::Vector3d t_w_curr(0, 0, 0);
 
-// 点云特征匹配时的优化变量
+// q_curr_last(x, y, z, w), t_curr_last
 double para_q[4] = {0, 0, 0, 1};
 double para_t[3] = {0, 0, 0};
 
-// 下面的2个分别是优化变量para_q和para_t的映射：表示的是两个world坐标系下的位姿P之间的增量，例如△P = P0.inverse() * P1
 Eigen::Map<Eigen::Quaterniond> q_last_curr(para_q);
 Eigen::Map<Eigen::Vector3d> t_last_curr(para_t);
 
@@ -265,12 +279,42 @@ int main(int argc, char **argv)
 
             TicToc t_whole;
             // initializing
-            if (!systemInited)// 第一帧不进行匹配，仅仅将 cornerPointsLessSharp 保存至 laserCloudCornerLast
-                              //                       将 surfPointsLessFlat    保存至 laserCloudSurfLast
-                              // 为下次匹配提供target
+            if (!systemInited)
             {
                 systemInited = true;
                 std::cout << "Initialization finished \n";
+
+                string filename = "/home/songming/lidarabsodometry.txt";
+                std::cout << "The first frame is the reference frame, save 6D pose in " << filename << " ..." << std::endl;
+                ofstream f;
+                f.open(filename.c_str(),ios::app);
+                f << fixed;
+                f << setprecision(9) << 1 << " " << 0 << " " << 0 << " "  << 0 << " " <<
+                                        0 << " " << 1 << " " << 0 << " "  << 0 << " " <<
+                                        0 << " " << 0 << " " << 1 << " "  << 0 << std::endl; 
+                f.close();
+
+                string filename113 = "/home/songming/lidarrelodometry.txt";
+                ofstream f54;
+                f54.open(filename113.c_str(),ios::app);
+                f54 << fixed;
+                f54 << setprecision(9) << 0 << " " << 0  << " " << 0 << " " <<
+                                        1 << " " << 0 << " " << 0 << " "  << 0 << std::endl;
+                f54.close();
+
+                string filename1 = "/home/songming/lodometry_cov.txt";
+                ofstream f23;
+                f23.open(filename1.c_str(),ios::app);
+                f23 << fixed;
+                f23 << setprecision(9) <<
+                1e-19 << " " << 1e-19 << " " << 1e-19 << " "  << 1e-19 << " " << 1e-19 << " " << 1e-19 << " "  << 1e-19 << " "<<
+                1e-19 << " " << 1e-19  << " " << 1e-19 << " "  << 1e-19 << " " << 1e-19  << " " << 1e-19 << " "<< 1e-19 << " "<<
+                1e-19 << " " << 1e-19 << " " << 1e-19 << " "  << 1e-19 << " " << 1e-19  << " " << 1e-19 << " " << 1e-19 << " "<<
+                1e-19 << " " << 1e-19  << " " << 1e-19 << " "  << 1e-19 << " " << 1e-19 << " " << 1e-19 << " " << 1e-19 << " "<<
+                1e-19 << " " << 1e-19  << " " << 1e-19 << " "  << 1e-19 << " " << 1e-19  << " " << 1e-19 << " " << 1e-19 << " "<<
+                1e-19 << " " << 1e-19  << " " <<1e-19 << " "  << 1e-19 << " " << 1e-19  << " " << 1e-19 << " " << 1e-19 << " "<<
+                1e-19 << " " << 1e-19 << " " << 1e-19 << " "  << 1e-19 << " " << 1e-19  << " " << 1e-19 << " " << 1e-19 << std::endl;
+                f23.close();
             }
             else
             {
@@ -278,7 +322,7 @@ int main(int argc, char **argv)
                 int surfPointsFlatNum = surfPointsFlat->points.size();
 
                 TicToc t_opt;
-                for (size_t opti_counter = 0; opti_counter < 2; ++opti_counter)// 点到线以及点到面的ICP，迭代2次
+                for (size_t opti_counter = 0; opti_counter < 2; ++opti_counter)
                 {
                     corner_correspondence = 0;
                     plane_correspondence = 0;
@@ -298,25 +342,24 @@ int main(int argc, char **argv)
                     std::vector<float> pointSearchSqDis;
 
                     TicToc t_data;
-                    // 基于最近邻原理建立corner特征点之间关联，find correspondence for corner features
+                    // find correspondence for corner features
                     for (int i = 0; i < cornerPointsSharpNum; ++i)
                     {
-                        TransformToStart(&(cornerPointsSharp->points[i]), &pointSel);// 将当前帧的corner_sharp特征点O_cur，从当前帧的Lidar坐标系下变换到上一帧的Lidar坐标系下（记为点O，注意与前面的点O_cur不同），以利于寻找corner特征点的correspondence
-                        kdtreeCornerLast->nearestKSearch(pointSel, 1, pointSearchInd, pointSearchSqDis);// kdtree中的点云是上一帧的corner_less_sharp，所以这是在上一帧
-                                                                                                        // 的corner_less_sharp中寻找当前帧corner_sharp特征点O的最近邻点（记为A）
+                        TransformToStart(&(cornerPointsSharp->points[i]), &pointSel);
+                        kdtreeCornerLast->nearestKSearch(pointSel, 1, pointSearchInd, pointSearchSqDis);
 
                         int closestPointInd = -1, minPointInd2 = -1;
-                        if (pointSearchSqDis[0] < DISTANCE_SQ_THRESHOLD)// 如果最近邻的corner特征点之间距离平方小于阈值，则最近邻点A有效
+                        if (pointSearchSqDis[0] < DISTANCE_SQ_THRESHOLD)
                         {
                             closestPointInd = pointSearchInd[0];
                             int closestPointScanID = int(laserCloudCornerLast->points[closestPointInd].intensity);
 
                             double minPointSqDis2 = DISTANCE_SQ_THRESHOLD;
-                            // 寻找点O的另外一个最近邻的点（记为点B） in the direction of increasing scan line
-                            for (int j = closestPointInd + 1; j < (int)laserCloudCornerLast->points.size(); ++j)// laserCloudCornerLast 来自上一帧的corner_less_sharp特征点,由于提取特征时是
-                            {                                                                                   // 按照scan的顺序提取的，所以laserCloudCornerLast中的点也是按照scanID递增的顺序存放的
+                            // search in the direction of increasing scan line
+                            for (int j = closestPointInd + 1; j < (int)laserCloudCornerLast->points.size(); ++j)
+                            {
                                 // if in the same scan line, continue
-                                if (int(laserCloudCornerLast->points[j].intensity) <= closestPointScanID)// intensity整数部分存放的是scanID
+                                if (int(laserCloudCornerLast->points[j].intensity) <= closestPointScanID)
                                     continue;
 
                                 // if not in nearby scans, end the loop
@@ -330,7 +373,7 @@ int main(int argc, char **argv)
                                                     (laserCloudCornerLast->points[j].z - pointSel.z) *
                                                         (laserCloudCornerLast->points[j].z - pointSel.z);
 
-                                if (pointSqDis < minPointSqDis2)// 第二个最近邻点有效,，更新点B
+                                if (pointSqDis < minPointSqDis2)
                                 {
                                     // find nearer point
                                     minPointSqDis2 = pointSqDis;
@@ -338,7 +381,7 @@ int main(int argc, char **argv)
                                 }
                             }
 
-                            // 寻找点O的另外一个最近邻的点B in the direction of decreasing scan line
+                            // search in the direction of decreasing scan line
                             for (int j = closestPointInd - 1; j >= 0; --j)
                             {
                                 // if in the same scan line, continue
@@ -356,7 +399,7 @@ int main(int argc, char **argv)
                                                     (laserCloudCornerLast->points[j].z - pointSel.z) *
                                                         (laserCloudCornerLast->points[j].z - pointSel.z);
 
-                                if (pointSqDis < minPointSqDis2)// 第二个最近邻点有效，更新点B
+                                if (pointSqDis < minPointSqDis2)
                                 {
                                     // find nearer point
                                     minPointSqDis2 = pointSqDis;
@@ -365,7 +408,7 @@ int main(int argc, char **argv)
                             }
                         }
                         if (minPointInd2 >= 0) // both closestPointInd and minPointInd2 is valid
-                        {                      // 即特征点O的两个最近邻点A和B都有效
+                        {
                             Eigen::Vector3d curr_point(cornerPointsSharp->points[i].x,
                                                        cornerPointsSharp->points[i].y,
                                                        cornerPointsSharp->points[i].z);
@@ -376,27 +419,26 @@ int main(int argc, char **argv)
                                                          laserCloudCornerLast->points[minPointInd2].y,
                                                          laserCloudCornerLast->points[minPointInd2].z);
 
-                            double s;// 运动补偿系数，kitti数据集的点云已经被补偿过，所以s = 1.0
+                            double s;
                             if (DISTORTION)
                                 s = (cornerPointsSharp->points[i].intensity - int(cornerPointsSharp->points[i].intensity)) / SCAN_PERIOD;
                             else
                                 s = 1.0;
-                            // 用点O，A，B构造点到线的距离的残差项，注意这三个点都是在上一帧的Lidar坐标系下，即，残差 = 点O到直线AB的距离
-                            // 具体到介绍lidarFactor.cpp时再说明该残差的具体计算方法
                             ceres::CostFunction *cost_function = LidarEdgeFactor::Create(curr_point, last_point_a, last_point_b, s);
-                            problem.AddResidualBlock(cost_function, loss_function, para_q, para_t);
+                            auto ID = problem.AddResidualBlock(cost_function, loss_function, para_q, para_t);
+                            psrIDs.push_back(ID);
                             corner_correspondence++;
                         }
                     }
-                    // 下面说的点符号与上述相同
-                    // 与上面的建立corner特征点之间的关联类似，寻找平面特征点O的最近邻点ABC，即基于最近邻原理建立surf特征点之间的关联，find correspondence for plane features
+
+                    // find correspondence for plane features
                     for (int i = 0; i < surfPointsFlatNum; ++i)
                     {
                         TransformToStart(&(surfPointsFlat->points[i]), &pointSel);
                         kdtreeSurfLast->nearestKSearch(pointSel, 1, pointSearchInd, pointSearchSqDis);
 
                         int closestPointInd = -1, minPointInd2 = -1, minPointInd3 = -1;
-                        if (pointSearchSqDis[0] < DISTANCE_SQ_THRESHOLD)// 找到的最近邻点A有效
+                        if (pointSearchSqDis[0] < DISTANCE_SQ_THRESHOLD)
                         {
                             closestPointInd = pointSearchInd[0];
 
@@ -421,13 +463,13 @@ int main(int argc, char **argv)
                                 // if in the same or lower scan line
                                 if (int(laserCloudSurfLast->points[j].intensity) <= closestPointScanID && pointSqDis < minPointSqDis2)
                                 {
-                                    minPointSqDis2 = pointSqDis;// 找到的第2个最近邻点有效，更新点B，注意如果scanID准确的话，一般点A和点B的scanID相同
+                                    minPointSqDis2 = pointSqDis;
                                     minPointInd2 = j;
                                 }
                                 // if in the higher scan line
                                 else if (int(laserCloudSurfLast->points[j].intensity) > closestPointScanID && pointSqDis < minPointSqDis3)
                                 {
-                                    minPointSqDis3 = pointSqDis;// 找到的第3个最近邻点有效，更新点C，注意如果scanID准确的话，一般点A和点B的scanID相同,且与点C的scanID不同，与LOAM的paper叙述一致
+                                    minPointSqDis3 = pointSqDis;
                                     minPointInd3 = j;
                                 }
                             }
@@ -460,7 +502,7 @@ int main(int argc, char **argv)
                                 }
                             }
 
-                            if (minPointInd2 >= 0 && minPointInd3 >= 0)// 如果三个最近邻点都有效
+                            if (minPointInd2 >= 0 && minPointInd3 >= 0)
                             {
 
                                 Eigen::Vector3d curr_point(surfPointsFlat->points[i].x,
@@ -481,15 +523,15 @@ int main(int argc, char **argv)
                                     s = (surfPointsFlat->points[i].intensity - int(surfPointsFlat->points[i].intensity)) / SCAN_PERIOD;
                                 else
                                     s = 1.0;
-                                // 用点O，A，B，C构造点到面的距离的残差项，注意这三个点都是在上一帧的Lidar坐标系下，即，残差 = 点O到平面ABC的距离
-                                // 同样的，具体到介绍lidarFactor.cpp时再说明该残差的具体计算方法
                                 ceres::CostFunction *cost_function = LidarPlaneFactor::Create(curr_point, last_point_a, last_point_b, last_point_c, s);
-                                problem.AddResidualBlock(cost_function, loss_function, para_q, para_t);
+                                auto ID = problem.AddResidualBlock(cost_function, loss_function, para_q, para_t);
+                                psrIDs.push_back(ID);
                                 plane_correspondence++;
                             }
                         }
                     }
 
+                    //printf("coner_correspondance %d, plane_correspondence %d \n", corner_correspondence, plane_correspondence);
                     printf("data association time %f ms \n", t_data.toc());
 
                     if ((corner_correspondence + plane_correspondence) < 10)
@@ -503,15 +545,134 @@ int main(int argc, char **argv)
                     options.max_num_iterations = 4;
                     options.minimizer_progress_to_stdout = false;
                     ceres::Solver::Summary summary;
-                    // 基于构建的所有残差项，求解最优的当前帧位姿与上一帧位姿的位姿增量：para_q和para_t
                     ceres::Solve(options, &problem, &summary);
                     printf("solver time %f ms \n", t_solver.toc());
+
+                    if(opti_counter == 1){
+                    //calculate the residuals
+
+                    /*ceres::Problem::EvaluateOptions EvalOpts;
+                    EvalOpts.apply_loss_function = false;
+                    //EvalOpts.residual_blocks = psrIDs;
+                    std::vector<double> Residuals;
+                    problem.Evaluate(EvalOpts, nullptr, &Residuals, nullptr, nullptr);
+                    double num_res = problem.NumResiduals();
+                    double squared_error = std::inner_product( Residuals.begin(), Residuals.end(), Residuals.begin(), 0);
+                    //the root mean squared error
+                    //double vairance_factor = std::sqrt(squared_error / (num_res - 6.0));
+                    double vairance_factor = squared_error / (num_res - 6.0);
+
+                    //int n_res = Residuals.size();
+                    //std::cout<<"The number of residual error is:"<<num_res<<std::endl;
+                    std::cout<<"The vairance factor is:"<<vairance_factor<<std::endl;
+                    //std::cout<<"The number of residual error is:"<<n_res<<std::endl;*/
+
+                 // get the estimation covariance matrix to model the uncertainty
+                    ceres::Covariance::Options cov_options;
+                    ceres::Covariance covariance(cov_options);
+
+                    vector<pair<const double*, const double*> > covariance_blocks;
+                    covariance_blocks.push_back(make_pair(para_q, para_q));
+                    covariance_blocks.push_back(make_pair(para_t, para_t));
+                    covariance_blocks.push_back(make_pair(para_t, para_q));
+                    covariance_blocks.push_back(make_pair(para_q, para_t));
+
+                    CHECK(covariance.Compute(covariance_blocks, &problem));
+
+                    double covariance_qq[4 * 4];
+                    double covariance_tt[3 * 3];
+                    double covariance_tq[3 * 4];
+                    double covariance_qt[4 * 3];
+
+                    covariance.GetCovarianceBlock(para_q, para_q, covariance_qq);
+                    covariance.GetCovarianceBlock(para_t, para_t, covariance_tt);
+                    covariance.GetCovarianceBlock(para_t, para_q, covariance_tq);
+                    covariance.GetCovarianceBlock(para_q, para_t, covariance_qt);
+
+
+
+                    if(covariance.GetCovarianceBlock(para_q, para_q, covariance_qq) && covariance.GetCovarianceBlock(para_t, para_t, covariance_tt)&& covariance.GetCovarianceBlock(para_t, para_q, covariance_tq)&& covariance.GetCovarianceBlock(para_q, para_t, covariance_qt))
+                    {
+
+                        Eigen::Map<Eigen::Matrix4d> rotation_cov(covariance_qq);
+                        Eigen::Map<Eigen::Matrix3d> translation_cov(covariance_tt);
+                        Eigen::Map<Eigen::Matrix<double, 3, 4>> tq_cov(covariance_tq);
+                        Eigen::Map<Eigen::Matrix<double, 4, 3>> qt_cov(covariance_qt);
+
+                        Eigen::Matrix<double, 7, 7> quat3D_cov;
+                        quat3D_cov.topLeftCorner(3, 3) =  translation_cov;
+                        quat3D_cov.bottomRightCorner(4, 4) =  rotation_cov;
+                        quat3D_cov.block <3, 4>(0, 3) =  tq_cov;
+                        quat3D_cov.block <4, 3>(3, 0) =  qt_cov;
+
+                        string filename = "/home/songming/lodometry_cov.txt";
+                        ofstream f11;
+                        f11.open(filename.c_str(),ios::app);
+                        f11 << fixed;
+                        f11 << setprecision(9) <<
+                        quat3D_cov(0,0) << " " << quat3D_cov(0,1)  << " " << quat3D_cov(0,2) << " "  << quat3D_cov(0,3) << " " << quat3D_cov(0,4)  << " " << quat3D_cov(0,5) << " "  << quat3D_cov(0,6) << " "<<
+                        quat3D_cov(1,0) << " " << quat3D_cov(1,1)  << " " << quat3D_cov(1,2) << " "  << quat3D_cov(1,3) << " " << quat3D_cov(1,4)  << " " << quat3D_cov(1,5) << " "  << quat3D_cov(1,6) << " "<<
+                        quat3D_cov(2,0) << " " << quat3D_cov(2,1)  << " " << quat3D_cov(2,2) << " "  << quat3D_cov(2,3) << " " << quat3D_cov(2,4)  << " " << quat3D_cov(2,5) << " "  << quat3D_cov(2,6) << " "<<
+                        quat3D_cov(3,0) << " " << quat3D_cov(3,1)  << " " << quat3D_cov(3,2) << " "  << quat3D_cov(3,3) << " " << quat3D_cov(3,4)  << " " << quat3D_cov(3,5) << " "  << quat3D_cov(3,6) << " "<<
+                        quat3D_cov(4,0) << " " << quat3D_cov(4,1)  << " " << quat3D_cov(4,2) << " "  << quat3D_cov(4,3) << " " << quat3D_cov(4,4)  << " " << quat3D_cov(4,5) << " "  << quat3D_cov(4,6) << " "<<
+                        quat3D_cov(5,0) << " " << quat3D_cov(5,1)  << " " << quat3D_cov(5,2) << " "  << quat3D_cov(5,3) << " " << quat3D_cov(5,4)  << " " << quat3D_cov(5,5) << " "  << quat3D_cov(5,6) << " "<<
+                        quat3D_cov(6,0) << " " << quat3D_cov(6,1)  << " " << quat3D_cov(6,2) << " "  << quat3D_cov(6,3) << " " << quat3D_cov(6,4)  << " " << quat3D_cov(6,5) << " "  << quat3D_cov(6,6) << std::endl;
+                        f11.close();
+                        //std::cout<<"The covariance is estimated in frame: "<< framenum<<std::endl;
+                        //std::cout<<"The quaternion rotation covariance is estimated as: "<<std::endl<< rotation_cov<<std::endl;
+                        //std::cout<<"The translation covariance is estimated as: "<<std::endl<< translation_cov<<std::endl;
+                        //std::cout<<"---------------------------------"<<std::endl;
+
+                    }
+                    else
+                    {
+                        string filename = "/home/songming/lodometry_cov.txt";
+                        ofstream f22;
+                        f22.open(filename.c_str(),ios::app);
+                        f22 << fixed;
+                        f22 << setprecision(9) <<
+                        1e9 << " " << 1e9 << " " << 1e9 << " "  << 1e9 << " " << 1e9 << " " << 1e9 << " "  << 1e9 << " "<<
+                        1e9 << " " << 1e9  << " " << 1e9 << " "  << 1e9 << " " << 1e9  << " " << 1e9 << " "<< 1e9 << " "<<
+                        1e9 << " " << 1e9 << " " << 1e9 << " "  << 1e9 << " " << 1e9  << " " << 1e9 << " " << 1e9 << " "<<
+                        1e9 << " " << 1e9  << " " << 1e9 << " "  << 1e9 << " " << 1e9 << " " << 1e9 << " " << 1e9 << " "<<
+                        1e9 << " " << 1e9  << " " << 1e9 << " "  << 1e9 << " " << 1e9  << " " << 1e9 << " " << 1e9 << " "<<
+                        1e9 << " " << 1e9  << " " <<1e9 << " "  << 1e9 << " " << 1e9  << " " << 1e9 << " " << 1e9 << " "<<
+                        1e9 << " " << 1e9 << " " << 1e9 << " "  << 1e9 << " " << 1e9  << " " << 1e9 << " " << 1e9 << std::endl;
+                        f22.close();
+                    }
+
+                }
                 }
                 printf("optimization twice time %f \n", t_opt.toc());
 
-                // 用最新计算出的位姿增量，更新上一帧的位姿，得到当前帧的位姿，注意这里说的位姿都指的是世界坐标系下的位姿
                 t_w_curr = t_w_curr + q_w_curr * t_last_curr;
                 q_w_curr = q_w_curr * q_last_curr;
+                Eigen::Matrix3d R = q_w_curr.normalized().toRotationMatrix();
+                //to do, transform to left_cam frame
+               // Eigen::Matrix3d R_rel = q_last_curr.normalized().toRotationMatrix();
+                //std::cout << "The odometry rotation is: "<< R << std::endl;
+
+                //save the odometry pose in KITTI dataset format
+
+
+                string filename111 = "/home/songming/lidarrelodometry.txt";
+                ofstream f44;
+                f44.open(filename111.c_str(),ios::app);
+                f44 << fixed;
+                f44 << setprecision(9) << t_last_curr[0] << " " << t_last_curr[1]  << " " << t_last_curr[2] << " " <<
+                                        q_last_curr.w()<< " " << q_last_curr.x()  << " " << q_last_curr.y() << " "  << q_last_curr.z() << std::endl;
+                f44.close();
+
+
+                string filename = "/home/songming/lidarabsodometry.txt";
+                ofstream f;
+                f.open(filename.c_str(),ios::app);
+                f << fixed;
+                f << setprecision(9) << R(0,0) << " " << R(0,1)  << " " << R(0,2) << " "  << t_w_curr(0) << " " <<
+                                        R(1,0) << " " << R(1,1)  << " " << R(1,2) << " "  << t_w_curr(1) << " " <<
+                                        R(2,0) << " " << R(2,1)  << " " << R(2,2) << " "  << t_w_curr(2) << std::endl;
+                f.close();
+
             }
 
             TicToc t_pub;
@@ -573,7 +734,7 @@ int main(int argc, char **argv)
 
             // std::cout << "the size of corner last is " << laserCloudCornerLastNum << ", and the size of surf last is " << laserCloudSurfLastNum << '\n';
 
-            kdtreeCornerLast->setInputCloud(laserCloudCornerLast);// 更新kdtree的点云
+            kdtreeCornerLast->setInputCloud(laserCloudCornerLast);
             kdtreeSurfLast->setInputCloud(laserCloudSurfLast);
 
             if (frameCount % skipFrameNum == 0)
@@ -604,6 +765,7 @@ int main(int argc, char **argv)
                 ROS_WARN("odometry process over 100ms");
 
             frameCount++;
+            framenum++;
         }
         rate.sleep();
     }
