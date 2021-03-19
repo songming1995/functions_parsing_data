@@ -11,12 +11,12 @@ import numpy as np
 import time
 from matplotlib import pyplot as plt
 # params for ShiTomasi corner detection
-feature_paramd = dict( maxCorners = 10,
-                       qualityLevel = 0.5,
+feature_paramd = dict( maxCorners = 5,
+                       qualityLevel = 0.4,
                        minDistance = 3,
                        )
 
-feature_params = dict( maxCorners = 100,
+feature_params = dict( maxCorners = 150,
                        qualityLevel = 0.5,
                        minDistance = 3,
                        )
@@ -52,9 +52,26 @@ valid55 = np.load('180valid_detections.npy')
 img1 = cv2.imread('000179.png')
 img2 = cv2.imread('000180.png')
 image_h, image_w, _ = img1.shape
+
+# gloabl mask for static parts of the scene
 masks = np.ones(img1.shape[:2],np.uint8)
 
+# global list container for corners in movable objects
+# save the object's index in the list during semantic RANSAC
+# instance-level object is saved as an array in the list
+# for each instance, it is composed by corner points in the numpy array
+movable_list1 = []
+movable_list2 = []
 
+# global list container for corners in static objects
+static_list1 = []
+static_list2 = []
+
+# global list container for corners in the background
+background_list1 = []
+background_list2 = []
+
+#pay attention to the gloabl and local variable with the same name
 for i in range(valid50[0]):        
     coor = np.copy(box50[0][i])    
     coor[0] = int(coor[0] * image_h)
@@ -62,7 +79,7 @@ for i in range(valid50[0]):
     coor[1] = int(coor[1] * image_w)
     coor[3] = int(coor[3] * image_w)
     masks[int(coor[0]):int(coor[2]), int(coor[1]):int(coor[3])] = 0
-    if score50[0][i] < 0.4:
+    if score50[0][i] < 0.4: # threshold to filter out low probability bboxes
         continue
     c1, c2 = (coor[1], coor[0]), (coor[3], coor[2])        
     cv2.rectangle(img1, c1, c2, (255,0,0), 1)
@@ -73,7 +90,10 @@ for i in range(valid50[0]):
     corners_2, st, err = cv2.calcOpticalFlowPyrLK(cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY), 
                                        cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY), corners_1, None, **lk_params)
     corners_1 = corners_1[st==1]
+    movable_list1.append(corners_1)
     corners_2 = corners_2[st==1]
+    movable_list2.append(corners_2)
+    
     for corner in corners_1:
         x,y = corner.ravel()
         cv2.circle(img1,(x,y),3,(0,0,255),-1)    
@@ -92,23 +112,39 @@ for i in range(valid55[0]):
     coor[3] = int(coor[3] * image_w)
     c1, c2 = (coor[1], coor[0]), (coor[3], coor[2])        
     cv2.rectangle(img2, c1, c2, (255,0,0), 1)
-#exclude the bounding box area to find static points for F matrix estimation       
+    
+    
+#exclude the bounding box area to find static background points for F matrix estimation       
 if (1):   #use local parameters, no conflict with others
     corners_1 = cv2.goodFeaturesToTrack(cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY), mask = masks, **feature_params)
     corners_2, st, err = cv2.calcOpticalFlowPyrLK(cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY), 
                                        cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY), corners_1, None, **lk_params)
     corners_1 = corners_1[st==1]
+    background_list1.append(corners_1)
     corners_2 = corners_2[st==1]
-    F,mask = computeFundamentalMatrix(corners_1, corners_2)
+    background_list2.append(corners_2)    
+
     for corner in corners_1:
         x,y = corner.ravel()
-        cv2.circle(img1,(x,y),3,(255,0,0),-1)    # blue feature points drawing in prev frame
+        cv2.circle(img1,(x,y),3,(255,0,0),-1)    # blue corner points drawing in prev frame
 
     for corner2 in corners_2:
         x2,y2 = corner2.ravel()
-        cv2.circle(img2,(x2,y2),3,(255,0,0),-1)  # blue feature points drawing in curr frame     
-
-
+        cv2.circle(img2,(x2,y2),3,(255,0,0),-1)  # blue corner points drawing in curr frame
+        
+    F,mask = computeFundamentalMatrix(corners_1, corners_2)
+    
+    for obj_corners1, obj_corners2 in zip(movable_list1, movable_list2):
+        corners1 = np.concatenate((obj_corners1, corners_1), axis=0)
+        corners2 = np.concatenate((obj_corners2, corners_2), axis=0)
+        F_esti, mask_movable = computeFundamentalMatrix(corners1, corners2)
+        
+        
+        
+    
+#concatenate the corners points from background parts and chosen bounding box, evaluate the F matrix and 
+#see the mask of inlier(1) and outlier(0), save the number of background points, the rest are on the movable
+#objects 
    
 #find corner points in the bounding boxes and track these points to next frame
 
@@ -118,11 +154,11 @@ if (1):   #use local parameters, no conflict with others
 
 #3. Calculate the opipolar geometry redisudals with the established correspondence points
 
-#4. Decision-making for moving objects based on the outliers propotion in the boundong box
+#4. Decision-making for moving objects based on the outliers proportion in the boundong box
 
 
 # t = time.time()
-  
+    #run a backward-check for match verification between frames
     # p1, st, err = cv2.calcOpticalFlowPyrLK(img0, img1, p0, None, **lk_params)
     # p0r, st, err = cv2.calcOpticalFlowPyrLK(img1, img0, p1, None, **lk_params)
     # d = abs(p0-p0r).reshape(-1, 2).max(-1)
