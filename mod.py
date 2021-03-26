@@ -10,6 +10,13 @@ import cv2
 import numpy as np
 import time
 from matplotlib import pyplot as plt
+
+class_file_name = '/home/songming/tensorflow-yolov4-tflite/data/classes/coco.names'
+names = {} #dictionart to save the class label
+with open(class_file_name, 'r') as data:
+    for ID, name in enumerate(data):
+        names[ID] = name.strip('\n')
+        
 # params for ShiTomasi corner detection
 feature_paramd = dict( maxCorners = 5,
                        qualityLevel = 0.4,
