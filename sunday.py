@@ -21,7 +21,7 @@ feature_paramd = dict( maxCorners = 15,
                         )
 
 feature_params = dict( maxCorners = 200,
-                        qualityLevel = 0.2,
+                        qualityLevel = 0.1,
                         minDistance = 3,
                         )
 
@@ -41,14 +41,6 @@ def computeFundamentalMatrix(kps_ref, kps_cur):
         print('more than one matrix found, just pick the first')
         F = F[0:3, 0:3]
     return np.matrix(F), mask
-
-# /home/songming/tensorflow-yolov4-tflite/Sequence_05/images -> image directory 05
-# /home/songming/tensorflow-yolov4-tflite/Sequence_05/labels -> label directory 05
-# /home/songming/tensorflow-yolov4-tflite/Sequence_071/images -> image directory 071
-# /home/songming/tensorflow-yolov4-tflite/Sequence_071/labels -> label directory 071
-# /home/songming/tensorflow-yolov4-tflite/data/classes/coco.names -> semantic label directory
-
- 
 
 # image_list = os.listdir('/home/songming/tensorflow-yolov4-tflite/Sequence_071/images')
 image_list = os.listdir('/home/songming/tensorflow-yolov4-tflite/Sequence_05/images')
@@ -81,7 +73,7 @@ for k in range(0,len(image_list)-1):
     img1_gr = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
     img2_gr = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
     # adaptive histogram equalization to improve the contrast of our images
-    clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
     img1_greq = clahe.apply(img1_gr)
     img2_greq = clahe.apply(img2_gr)
   
@@ -97,9 +89,8 @@ for k in range(0,len(image_list)-1):
     valid2 = np.load('/home/songming/tensorflow-yolov4-tflite/Sequence_05/labels' +'/' + file_name2 + 'valid.npy')
     
     # mask for background parts of the scene
-    maskb = np.ones(img1.shape[:2],np.uint8)  #background mask, set all ones initially
+    maskb2 = np.ones(img2.shape[:2],np.uint8)  #background mask, set all ones initially
     
-    maskb = np.ones(img1.shape[:2],np.uint8)  #background mask, set all ones initially
     
     # global list container for corners in movable objects
     # save the object's index in the list during semantic RANSAC
@@ -125,105 +116,108 @@ for k in range(0,len(image_list)-1):
     static_list2_coor = []
     
     # global list container for corners in the background
-    background_list1 = []
-    background_list2 = []
+    # background_list1 = []
+    # background_list2 = []
     
     #pay attention to the gloabl and local variable with the same name
-    for j in range(valid2[0]): 
-        if score2[0][j] < 0.2: # threshold to filter out low probability bboxes
-            continue
-        coor2 = np.copy(box2[0][j])    
-        coor2[0] = int(coor2[0] * image_h)
-        coor2[2] = int(coor2[2] * image_h)
-        coor2[1] = int(coor2[1] * image_w)
-        coor2[3] = int(coor2[3] * image_w)
+
         #to do
         #put coor in a list -> static_list2_coor and movable_list2_coor 
         #put class name in a list for semantic check, outlier rejection
         
+       
         
-        
-        
-        
-    for i in range(valid1[0]):
-        if score1[0][i] < 0.2: # threshold to filter out low probability bboxes
+    for i in range(valid2[0]):
+        if score2[0][i] < 0.2: # threshold to filter out low probability bboxes
             continue        
-        coor = np.copy(box1[0][i])    
-        coor[0] = int(coor[0] * image_h)
-        coor[2] = int(coor[2] * image_h)
-        coor[1] = int(coor[1] * image_w)
-        coor[3] = int(coor[3] * image_w)       
-        class_ind = int(classes[0][i])
+        coor2 = np.copy(box2[0][i])    
+        coor2[0] = int(coor2[0] * image_h)
+        coor2[2] = int(coor2[2] * image_h)
+        coor2[1] = int(coor2[1] * image_w)
+        coor2[3] = int(coor2[3] * image_w) 
+        
+        class_ind2 = int(classes2[0][i])
 
         
         
-        if class_ind in static_object:
-            static_list1_coor.append(coor)
-            masks = np.zeros(img1.shape[:2],np.uint8)
-            masks[int(coor[0]):int(coor[2]), int(coor[1]):int(coor[3])] = 1
-            corners_1 = cv2.goodFeaturesToTrack(cv2.cvtColor(img1_greq, mask = masks, **feature_paramd)        
-            corners_2, st, err = cv2.calcOpticalFlowPyrLK(img1_greq, img2_greq, corners_1, None, **lk_params)
-            corners_1 = corners_1[st==1]
-            static_list1.append(corners_1)       
+        if class_ind2 in static_object:
+            static_list2_coor.append(coor2)
+            masks2 = np.zeros(img2.shape[:2],np.uint8)
+            masks2[int(coor2[0]):int(coor2[2]), int(coor2[1]):int(coor2[3])] = 1
+            corners_2 = cv2.goodFeaturesToTrack(img2_greq, mask = masks2, **feature_paramd)
+            corners_1, st, err = cv2.calcOpticalFlowPyrLK(img2_greq, img1_greq, corners_2, None, **lk_params)
             corners_2 = corners_2[st==1]
-            static_list2.append(corners_2)            
+            static_list2.append(corners_2)       
+            corners_1 = corners_1[st==1]
+            static_list1.append(corners_1)            
         else:
-            movable_list1_coor.append(coor)
-            maskd = np.zeros(img1.shape[:2],np.uint8)
-            maskd[int(coor[0]):int(coor[2]), int(coor[1]):int(coor[3])] = 1
-            maskb[int(coor[0]):int(coor[2]), int(coor[1]):int(coor[3])] = 0
-            cornerd_1 = cv2.goodFeaturesToTrack(cv2.cvtColor(img1_greq, mask = maskd, **feature_paramd)        
-            cornerd_2, st, err = cv2.calcOpticalFlowPyrLK(img1_greq, img2_greq, cornerd_1, None, **lk_params)       
-            cornerd_1 = cornerd_1[st==1]
-            movable_list1.append(cornerd_1)       
+            movable_list2_coor.append(coor2)
+            maskd2 = np.zeros(img2.shape[:2],np.uint8)
+            maskd2[int(coor2[0]):int(coor2[2]), int(coor2[1]):int(coor2[3])] = 1
+            maskb2[int(coor2[0]):int(coor2[2]), int(coor2[1]):int(coor2[3])] = 0
+            cornerd_2 = cv2.goodFeaturesToTrack(img2_greq, mask = maskd2, **feature_paramd)
+            cornerd_1, st, err = cv2.calcOpticalFlowPyrLK(img2_greq, img1_greq, cornerd_2, None, **lk_params)          
             cornerd_2 = cornerd_2[st==1]
             movable_list2.append(cornerd_2)
+            cornerd_1 = cornerd_1[st==1]
+            movable_list1.append(cornerd_1)       
+
             
        
-        cornerb_1 = cv2.goodFeaturesToTrack(img1_greq, mask = maskb, **feature_params)
-        cornerb_2, st, err = cv2.calcOpticalFlowPyrLK(img1_greq, img2_greq, cornerb_1, None, **lk_params)
-        cornerb_1 = cornerb_1[st==1]
-        background_list1.append(cornerb_1)
+        cornerb_2 = cv2.goodFeaturesToTrack(img2_greq, mask = maskb2, **feature_params)
+        cornerb_1, st, err = cv2.calcOpticalFlowPyrLK(img2_greq, img1_greq, cornerb_2, None, **lk_params)
         cornerb_2 = cornerb_2[st==1]
-        background_list2.append(cornerb_2)
+        # background_list2.append(cornerb_2)
+        cornerb_1 = cornerb_1[st==1]
+        # background_list1.append(cornerb_1)
+
         
-        F,mask = computeFundamentalMatrix(cornerb_1, cornerb_2)
+        F,mask = computeFundamentalMatrix(cornerb_2, cornerb_1)
         
         
         #concatenate the corners points from background parts and chosen bounding box         
         #evaluate the F matrix and see the mask of inlier(1) and outlier(0)
     
-        for obj_corners1, obj_corners2, coor in zip(movable_list1, movable_list2, movable_list2_coor):
-            cornerc1 = np.concatenate((obj_corners1, cornerb_1), axis=0)
+        for obj_corners2, obj_corners1, coor in zip(movable_list2, movable_list1, movable_list2_coor):
+            if len(obj_corners2) < 3: 
+                # not enougn information for decision making, label the box as unknown in green
+                c1_g, c2_g = (coor[1], coor[0]), (coor[3], coor[2])
+                cv2.rectangle(img2, c1_g, c1_g, (0,255,0), 1) 
+                for tmp_g in obj_corners2:
+                    x2_g,y2_g = tmp_g.ravel()
+                    cv2.circle(img2,(x2_g,y2_g),3,(0,255,0),-1)
+                continue                            
             cornerc2 = np.concatenate((obj_corners2, cornerb_2), axis=0)
-            F_esti, mask_movable = computeFundamentalMatrix(cornerc1, cornerc2)
+            cornerc1 = np.concatenate((obj_corners1, cornerb_1), axis=0) #cornerc -> corner concatenated
+            F_esti, mask_movable = computeFundamentalMatrix(cornerc2, cornerc1)
             
             #to do
             #add the outlier of semantic constraint and FVB)Constraint (parallax of static labels)
             #further check the inliers from mask_movable 
             
-            prob_moving = 1-sum(mask_movable[0:len(obj_corners1)])/len(obj_corners1)
+            prob_moving = 1-sum(mask_movable[0:len(obj_corners2)])/len(obj_corners2)
 
-            if a > 0.5:
+            if prob_moving > 0.5:               
                 # plot the moving object in red
-                
+                c1_r, c2_r = (coor[1], coor[0]), (coor[3], coor[2])
+                cv2.rectangle(img2, c1_r, c2_r, (0,0,255), 1)                                                                
                 # plot corner outliers in the moving object
-                for tmp in obj_corners1:
-                    x,y = tmp.ravel()
-                    cv2.circle(img2,(x,y),3,(0,0,255),-1)
-            else:
-                
-                #plot static objects (objects with static labels + non-moving objects)
-                
-                #plot unknown objects which do not have feature points on it
+                for tmp_r in obj_corners2:
+                    x2_r,y2_r = tmp_r.ravel()
+                    cv2.circle(img2,(x2_r,y2_r),3,(0,0,255),-1)
+            else:                
+                # plot static objects in blue
+                c1_b, c2_b = (coor[1], coor[0]), (coor[3], coor[2])
+                cv2.rectangle(img2, c1_b, c2_b, (255,0,0), 1)
+                for tmp_b in obj_corners2:
+                    x2_b,y2_b = tmp_b.ravel()
+                    cv2.circle(img2,(x2_b,y2_b),3,(255,0,0),-1)
 
     #save the image into RANSAC folder
-                                   
-    # Create a mask image for drawing purposes
-    # mask = np.zeros_like(old_frame)
-    # mask = cv2.line(mask, (a,b),(c,d), color[i].tolist(), 2)
-    # img = cv2.add(frame,mask)
+    cv2.imwrite('/home/songming/tensorflow-yolov4-tflite/Sequence_05/RANSAC/' + file_name2 + ext2, img2)
     
+    
+                
     
    
 
