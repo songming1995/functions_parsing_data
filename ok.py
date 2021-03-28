@@ -15,8 +15,8 @@ import os
 import core.utils as utils
 from PIL import Image
 #params for ShiTomasi corner detection
-feature_paramd = dict( maxCorners = 15,
-                        qualityLevel = 0.2,
+feature_paramd = dict( maxCorners = 30,
+                        qualityLevel = 0.1,
                         minDistance = 3,
                         )
 
@@ -179,7 +179,7 @@ for k in range(0,len(image_list)-1):
         #evaluate the F matrix and see the mask of inlier(1) and outlier(0)
     
         for obj_corners2, obj_corners1, coor in zip(movable_list2, movable_list1, movable_list2_coor):
-            if len(obj_corners2) < 3: 
+            if len(obj_corners2) < 8: 
                 # not enougn information for decision making, label the box as unknown in green
                 c1_g, c2_g = (coor[1], coor[0]), (coor[3], coor[2])
                 cv2.rectangle(img2, c1_g, c1_g, (0,255,0), 1) 
@@ -197,7 +197,7 @@ for k in range(0,len(image_list)-1):
             
             prob_moving = 1-sum(mask_movable[0:len(obj_corners2)])/len(obj_corners2)
 
-            if prob_moving > 0.5:               
+            if prob_moving > 0.1:               
                 # plot the moving object in red
                 c1_r, c2_r = (coor[1], coor[0]), (coor[3], coor[2])
                 cv2.rectangle(img2, c1_r, c2_r, (0,0,255), 1)                                                                
@@ -214,12 +214,4 @@ for k in range(0,len(image_list)-1):
                     cv2.circle(img2,(x2_b,y2_b),3,(255,0,0),-1)
 
     #save the image into RANSAC folder
-    cv2.imwrite('/home/songming/tensorflow-yolov4-tflite/Sequence_05/RANSAC/' + file_name2 + ext2, img2)
-    
-    
-                
-    
-   
-
-    
-
+    cv2.imwrite('/home/songming/tensorflow-yolov4-tflite/Sequence_05/RANSAC/' + file_name2 + ext2, img2)                        
