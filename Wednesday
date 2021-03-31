@@ -1,0 +1,318 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Mar 12 15:19:00 2021
+
+@author: haixin
+"""
+
+import cv2
+import numpy as np
+# import time
+# from matplotlib import pyplot as plt
+# from detector import detector
+import os
+# import core.utils as utils
+# import math
+# from PIL import Image
+from interval import Interval
+from shapely import geometry
+
+#params for ShiTomasi corner detection
+feature_paramd = dict( maxCorners = 30,
+                        qualityLevel = 0.1,
+                        minDistance = 2,
+                        )
+
+feature_params = dict( maxCorners = 200,
+                        qualityLevel = 0.2,
+                        minDistance = 7,
+                        )
+
+# Parameters for lucas kanade optical flow
+lk_params = dict( winSize  = (15,15),
+                  maxLevel = 2,
+                  criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
+
+class_file_name = '/home/songming/tensorflow-yolov4-tflite/data/classes/coco.names'
+names = {}  # dictionary to save the class label
+with open(class_file_name, 'r') as data:
+    for ID, name in enumerate(data):
+        names[ID] = name.strip('\n')
+
+image_list = os.listdir('/home/songming/tensorflow-yolov4-tflite/Sequence_05/images')
+image_list.sort()
+
+num_classes = len(names)
+static_object = [9, 10, 11, 12, 13,58]
+fontScale = 0.5
+
+def draw_label(coor, label, coco_names, img, fontScale, bbox_thick, boxcolor):
+    c1_s, _ = (coor[1], coor[0]), (coor[3], coor[2])
+    bbox_mess_s = '%s:' % (coco_names[label])
+    t_size_s = cv2.getTextSize(bbox_mess_s, 0, fontScale, thickness=bbox_thick // 2)[0]
+    c3_s = (c1_s[0] + t_size_s[0], c1_s[1] - t_size_s[1] - 3)
+    cv2.rectangle(img, c1_s, (np.float32(c3_s[0]), np.float32(c3_s[1])), boxcolor, -1)
+    cv2.putText(img, bbox_mess_s, (c1_s[0], np.float32(c1_s[1] - 2)), cv2.FONT_HERSHEY_SIMPLEX,
+                     fontScale, (0, 0, 0), bbox_thick // 2, lineType=cv2.LINE_AA)
+
+def if_inPoly(polygon, Points):
+    line = geometry.LineString(polygon)
+    point = geometry.Point(Points)
+    polygon = geometry.Polygon(line)
+    return polygon.contains(point)
+
+def computeFundamentalMatrix(kps_ref, kps_cur):             
+    F, mask = cv2.findFundamentalMat(kps_ref, kps_cur, cv2.FM_RANSAC, 2, 0.99)
+    if F is None or F.shape == (1, 1):
+        # no fundamental matrix found
+        raise Exception('No fundamental matrix found')
+    elif F.shape[0] > 3:
+        # more than one matrix found, just pick the first
+        print('more than one matrix found, just pick the first')
+        F = F[0:3, 0:3]
+    return np.matrix(F), mask
+
+def get_nearest_neighbour(cur_point, search_list):
+    dis = []
+    for s in range(len(search_list)): 
+        # create a list_1 of bbox centers, parsing the list movable_list1_coor to get center of bbox
+        center_x = ( search_list[s][3] + search_list[s][1] ) / 2
+        center_y = ( search_list[s][2] + search_list[s][0] ) / 2
+        d = (cur_point[0] - center_x)**2 + (cur_point[1] - center_y)**2        
+        dis.append(d)
+    ind_list = dis.index(min(dis))   
+    return ind_list
+
+
+for k in range(0,len(image_list)-1):
+# for k in range(0,2):
+    
+    file_name1, ext1 = os.path.splitext(image_list[k]) #split filename and format
+    file_name2, ext2 = os.path.splitext(image_list[k+1]) #split filename and format    
+    
+    img1 = cv2.imread(os.path.join('/home/songming/tensorflow-yolov4-tflite/Sequence_05/images', image_list[k]))
+    img2 = cv2.imread(os.path.join('/home/songming/tensorflow-yolov4-tflite/Sequence_05/images', image_list[k+1]))
+    image_h, image_w, _ = img1.shape 
+    bbox_thick = int(0.6 * (image_h + image_w) / 600)
+    #convert to grayscale
+    img1_gr = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
+    img2_gr = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
+    # adaptive histogram equalization to improve the contrast of our images
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    img1_greq = clahe.apply(img1_gr)
+    img2_greq = clahe.apply(img2_gr)
+  
+    
+    box1 = np.load('/home/songming/tensorflow-yolov4-tflite/Sequence_05/labels' +'/' + file_name1 + 'box.npy')    
+    score1 = np.load('/home/songming/tensorflow-yolov4-tflite/Sequence_05/labels' +'/' + file_name1  + 'score.npy')        
+    classes1 = np.load('/home/songming/tensorflow-yolov4-tflite/Sequence_05/labels' +'/' + file_name1 + 'classes.npy')    
+    valid1 = np.load('/home/songming/tensorflow-yolov4-tflite/Sequence_05/labels' +'/' + file_name1 + 'valid.npy')
+
+    box2 = np.load('/home/songming/tensorflow-yolov4-tflite/Sequence_05/labels' +'/' + file_name2 + 'box.npy')    
+    score2 = np.load('/home/songming/tensorflow-yolov4-tflite/Sequence_05/labels' +'/' + file_name2  + 'score.npy')        
+    classes2 = np.load('/home/songming/tensorflow-yolov4-tflite/Sequence_05/labels' +'/' + file_name2 + 'classes.npy')    
+    valid2 = np.load('/home/songming/tensorflow-yolov4-tflite/Sequence_05/labels' +'/' + file_name2 + 'valid.npy')
+    
+    # mask for background parts of the scene
+    maskb2 = np.ones(img2.shape[:2],np.uint8)  #background mask, set all ones initially
+
+    # instance-level object is saved as an array in the list
+    # for each instance, it is composed by corner points in the numpy array
+    
+    # global list container for corners in movable objects    
+    movable_list1 = []
+    movable_list2 = []
+    
+    # global list container for coordinates of movable objects 
+    movable_list1_coor = []
+    movable_list2_coor = []
+    # global list container for labels of movable objects
+    movable_list1_label = []
+    movable_list2_label = []
+    static_list2_label = []
+    
+    # global list container for corners in static objects
+    static_list1 = []
+    static_list2 = []
+    
+    # global list container for coordinates of static objects
+    static_list1_coor = []
+    static_list2_coor = []
+    
+    
+    #pay attention to the gloabl and local variable with the same name
+
+        
+    for h in range(valid1[0]):
+        if score1[0][h] < 0.2: # threshold to filter out low probability bboxes
+            continue        
+
+        class_ind1 = int(classes1[0][h])
+        if class_ind1 in static_object:
+            continue
+        
+        movable_list1_label.append(class_ind1)
+        coor1 = np.copy(box1[0][h])    
+        coor1[0] = int(coor1[0] * image_h)
+        coor1[2] = int(coor1[2] * image_h)
+        coor1[1] = int(coor1[1] * image_w)
+        coor1[3] = int(coor1[3] * image_w)
+        movable_list1_coor.append(coor1)
+        
+        
+              
+        
+    for i in range(valid2[0]):
+        if score2[0][i] < 0.2: # threshold to filter out low probability bboxes
+            continue        
+        coor2 = np.copy(box2[0][i])    
+        coor2[0] = int(coor2[0] * image_h)
+        coor2[2] = int(coor2[2] * image_h)
+        coor2[1] = int(coor2[1] * image_w)
+        coor2[3] = int(coor2[3] * image_w) 
+        
+        class_ind2 = int(classes2[0][i])
+
+        
+        
+        if class_ind2 in static_object:
+            static_list2_coor.append(coor2)
+            static_list2_label.append(class_ind2)
+            masks2 = np.zeros(img2.shape[:2],np.uint8)
+            masks2[int(coor2[0]):int(coor2[2]), int(coor2[1]):int(coor2[3])] = 1
+            corners_2 = cv2.goodFeaturesToTrack(img2_greq, mask = masks2, **feature_paramd)
+            corners_1, sts, errs = cv2.calcOpticalFlowPyrLK(img2_greq, img1_greq, corners_2, None, **lk_params)
+            corners_2 = corners_2[sts==1]
+            static_list2.append(corners_2)       
+            corners_1 = corners_1[sts==1]
+            static_list1.append(corners_1)            
+        else:
+            movable_list2_coor.append(coor2)
+            movable_list2_label.append(class_ind2)
+            maskd2 = np.zeros(img2.shape[:2],np.uint8)
+            maskd2[int(coor2[0]):int(coor2[2]), int(coor2[1]):int(coor2[3])] = 1
+            maskb2[int(coor2[0]):int(coor2[2]), int(coor2[1]):int(coor2[3])] = 0
+            cornerd_2 = cv2.goodFeaturesToTrack(img2_greq, mask = maskd2, **feature_paramd)
+            cornerd_1, std, errd = cv2.calcOpticalFlowPyrLK(img2_greq, img1_greq, cornerd_2, None, **lk_params)          
+            cornerd_2 = cornerd_2[std==1]
+            movable_list2.append(cornerd_2)
+            cornerd_1 = cornerd_1[std==1]
+            movable_list1.append(cornerd_1)       
+
+            
+       
+    cornerb_2 = cv2.goodFeaturesToTrack(img2_greq, mask = maskb2, **feature_params)
+    cornerb_1, stb, errb = cv2.calcOpticalFlowPyrLK(img2_greq, img1_greq, cornerb_2, None, **lk_params)    
+    # modify the st by checking their semantic labels
+    # suppress the back-ground points lying in the bounding box
+    # improve F matrix fitting
+    #st -> n*1 array
+    for z in range(len(stb)):
+        point = (cornerb_1[z][0][0].copy(), cornerb_1[z][0][1].copy())
+        for s in range(len(movable_list1_coor)):
+            c1 = (movable_list1_coor[s][1], movable_list1_coor[s][0])
+            c2 = (movable_list1_coor[s][3], movable_list1_coor[s][0])
+            c3 = (movable_list1_coor[s][3], movable_list1_coor[s][2])
+            c4 = (movable_list1_coor[s][1], movable_list1_coor[s][2])
+            rect = [c1, c2, c3, c4]
+            if if_inPoly(rect, point):
+                stb[z] = 0
+        
+    cornerb_2 = cornerb_2[stb==1] # n*2 array
+    cornerb_1 = cornerb_1[stb==1] # n*2 array
+
+
+    
+    F,mask = computeFundamentalMatrix(cornerb_2, cornerb_1)
+    
+    # add the outlier of FVB Constraint (parallax of static labels)
+    # calculate the range of flow vector using background points
+    flow_vector = cornerb_2 - cornerb_1 # n*2 array
+    vector_x = flow_vector[:, 0] # n*1 array
+    x_range = Interval(np.amin(vector_x), np.amax(vector_x))
+    vector_y = flow_vector[:, 1] # n*1 array
+    y_range = Interval(np.amin(vector_y), np.amax(vector_y)) 
+    
+    
+    
+        
+        
+        #concatenate the corners points from background parts and chosen bounding box         
+        #evaluate the F matrix and see the mask of inlier(1) and outlier(0)
+    for static_corners, static_coor, static_label in zip(static_list2, static_list2_coor, static_list2_label):
+        boxcolor_b = (255,0,0)
+        draw_label(static_coor, static_label, names, img2, fontScale, bbox_thick, boxcolor_b)
+        
+        c1_s, c2_s = (static_coor[1], static_coor[0]), (static_coor[3], static_coor[2])
+              
+        cv2.rectangle(img2, c1_s, c2_s, boxcolor_b, 1)
+        
+        for tmp_s in static_corners:
+            x2_s,y2_s = tmp_s.ravel()
+            cv2.circle(img2,(x2_s,y2_s),3,boxcolor_b,-1)
+        
+    
+    for obj_corners2, obj_corners1, coor, label_2 in zip(movable_list2, movable_list1, movable_list2_coor, movable_list2_label):
+        if len(obj_corners2) < 8: 
+            # not enougn information for decision making, label the box as unknown in green
+            boxcolor_g = (0,255,0)
+            c1_g, c2_g = (coor[1], coor[0]), (coor[3], coor[2])
+            cv2.rectangle(img2, c1_g, c1_g, boxcolor_g, 1)
+            
+            draw_label(coor, label_2, names, img2, fontScale, bbox_thick, boxcolor_g)
+            for tmp_g in obj_corners2:
+                x2_g,y2_g = tmp_g.ravel()
+                cv2.circle(img2,(x2_g,y2_g),3,boxcolor_g,-1)
+            continue                            
+        cornerc2 = np.concatenate((obj_corners2, cornerb_2), axis=0)
+        cornerc1 = np.concatenate((obj_corners1, cornerb_1), axis=0) #cornerc -> corner concatenated
+        F_esti, mask_movable = computeFundamentalMatrix(cornerc2, cornerc1)
+        
+        
+        
+        #further check the inliers from mask_movable
+        #if labels of matching points are different:
+        # add the outlier of semantic constraint (done)
+        for l in range(0,len(obj_corners1)):
+            # obj_corners1 (matched points in img1) -> iterate this to find to corresponding labels
+            corner_1 = obj_corners1[l] #corner points saved in an array
+            # nearest neighbour of center of bbox
+            ind_list = get_nearest_neighbour(corner_1, movable_list1_coor)
+            # movable_list1_coor and movable_list1_label have the same index
+            label_1 = movable_list1_label[ind_list]
+            if label_1 != label_2: # label2 -> label of points obj_corners2
+                mask_movable[l][0] = 0
+                
+            #check Flow bound vector
+            flow = obj_corners2[l] - obj_corners1[l]
+            if flow[0] not in x_range or flow[1] not in y_range:
+                mask_movable[l][0] = 0
+                
+            
+
+               
+        prob_moving = 1 - sum(mask_movable[0:len(obj_corners2)])/len(obj_corners2)
+
+        if prob_moving > 0.5:               
+            # plot the moving object in red
+            boxcolor_r = (0,0,255)
+            c1_r, c2_r = (coor[1], coor[0]), (coor[3], coor[2])
+            cv2.rectangle(img2, c1_r, c2_r, boxcolor_r, 1)
+            draw_label(coor, label_2, names, img2, fontScale, bbox_thick, boxcolor_r)                                                            
+            # plot corner outliers in the moving object
+            for tmp_r in obj_corners2:
+                x2_r,y2_r = tmp_r.ravel()
+                cv2.circle(img2,(x2_r,y2_r),3,boxcolor_r,-1)
+        else:                
+            # plot static objects in blue
+            boxcolor_b = (255,0,0)
+            c1_b, c2_b = (coor[1], coor[0]), (coor[3], coor[2])
+            cv2.rectangle(img2, c1_b, c2_b, boxcolor_b, 1)
+            draw_label(coor, label_2, names, img2, fontScale, bbox_thick, boxcolor_b) 
+            for tmp_b in obj_corners2:
+                x2_b,y2_b = tmp_b.ravel()
+                cv2.circle(img2,(x2_b,y2_b),3,boxcolor_b,-1)
+
+    #save the image into RANSAC folder
+    cv2.imwrite('/home/songming/tensorflow-yolov4-tflite/Sequence_05/RANSAC/' + file_name2 + ext2, img2)                        
