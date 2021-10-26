@@ -12,10 +12,15 @@ import open3d_tutorial as o3dtut
 # change to True if you want to interact with the visualization windows
 o3dtut.interactive = not "CI" in os.environ
 
+import os, os.path
+DIR = '/home/songming/velodyne_points/data'
+num_iter = len([name for name in os.listdir(DIR) if os.path.isfile(os.path.join(DIR, name))])
+print (num_iter)
+
 vis = o3d.visualization.Visualizer()
 vis.create_window()
 
-num_iter = 300
+
 for i in range(num_iter):
     print("/home/songming/velodyne_points/data/%010d.bin"%i)
     bin_pcd = np.fromfile("/home/songming/velodyne_points/data/%010d.bin"%i, dtype=np.float32)
