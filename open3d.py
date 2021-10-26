@@ -1,3 +1,17 @@
+import os
+os.environ['NUMEXPR_MAX_THREADS'] = '16'
+import open3d as o3d
+import numpy as np
+import matplotlib.pyplot as plt
+import copy
+import sys
+
+# only needed for tutorial, monkey patches visualization
+sys.path.append('..')
+import open3d_tutorial as o3dtut
+# change to True if you want to interact with the visualization windows
+o3dtut.interactive = not "CI" in os.environ
+
 vis = o3d.visualization.Visualizer()
 vis.create_window()
 
