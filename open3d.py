@@ -42,3 +42,7 @@ for i in range(num_iter):
     vis.update_renderer()
     
 vis.destroy_window()
+
+
+A = o3d.geometry.AxisAlignedBoundingBox(np.array([1,2,3]), np.array([10,11,13]))
+o3d.visualization.draw_geometries([A],zoom=5)
