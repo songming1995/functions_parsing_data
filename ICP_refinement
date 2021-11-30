@@ -14,6 +14,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import copy
 import sys
+import time
 ## http://localhost:8888/notebooks/Open3D/examples/python/pipelines/global_registration.ipynb
 ## registration_ransac_based_on_feature_matching
 ## registration_fast_based_on_feature_matching
@@ -200,13 +201,15 @@ fitness_value = []
 time_index  = []
 dist_before = []
 dist_after = []
-num_iter = 200
+num_iter = 5
 
 mean_dist_before = []
 mean_dist_after = []
-
+inference_time = []
 last_pose = np.identity(4)
 for i in range(num_iter):
+    
+    t_start = time.time()
     time_index.append(i)
     print("/home/songming/velodyne_points/data/%010d.bin"%i)
     bin_pcd = np.fromfile("/home/songming/velodyne_points/data/%010d.bin"%i, dtype=np.float32)
@@ -219,37 +222,49 @@ for i in range(num_iter):
     o3d_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
     o3d_pcd_f = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points_f))
     
+
+    
+    voxel = 0.1
+    
+    source_down = o3d_pcd.voxel_down_sample(voxel_size=voxel)
+    target_down = o3d_pcd_f.voxel_down_sample(voxel_size=voxel)
+    
+    source = remove_ground(source_down)
+    target = remove_ground(target_down)
+    t_ground = time.time()
+    print(':: the time elapsed for ground points removal')
+    print((time.time() - t_start)*1000)
+    
+    
     # o3d_pcd_gf = remove_ground(o3d_pcd)
     # o3d_pcd_f_gf = remove_ground(o3d_pcd_f)
     
     # voxel = 0.1
     
-    # source = o3d_pcd_gf.voxel_down_sample(voxel_size=voxel)
-    # target = o3d_pcd_f_gf.voxel_down_sample(voxel_size=voxel)
-    
-    
-    # o3d_pcd_gf = remove_ground(o3d_pcd)
-    # o3d_pcd_f_gf = remove_ground(o3d_pcd_f)
-    
-    voxel = 0.1
-    
-    source = o3d_pcd.voxel_down_sample(voxel_size=voxel)
-    target = o3d_pcd_f.voxel_down_sample(voxel_size=voxel)
+    # source = o3d_pcd.voxel_down_sample(voxel_size=voxel)
+    # target = o3d_pcd_f.voxel_down_sample(voxel_size=voxel)
     
     # std_ratio, which allows setting the threshold level based on the standard deviation of the 
     # average distances across the point cloud. 
     # The lower this number the more aggressive the filter will be.
+
+    
+    
     cl_source, ind_source = source.remove_statistical_outlier(nb_neighbors=20,
                                                     std_ratio=2)
 
     cl_target, ind_target = target.remove_statistical_outlier(nb_neighbors=20,
                                                     std_ratio=2)
-    print('calculate the distance before the ICP registration, the distance is:')
+    print(':: calculate the distance before the ICP registration, the distance is:')
     dist_source_target = cl_source.compute_point_cloud_distance(cl_target)
     np_dist = np.asarray(dist_source_target)
+    print(np.mean(np_dist[np_dist<1]))
     mean_dist_before.append(np.mean(np_dist))
     dist_before.append(np_dist)
-    
+        
+    t_cal_distance = time.time()
+    print(':: the time elapsed for distance calculation before the registration')
+    print((time.time() - t_ground)*1000)
     
     cl_source.estimate_normals(
       search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=2*voxel, max_nn=30))
@@ -273,10 +288,21 @@ for i in range(num_iter):
     target_fpfh = o3d.pipelines.registration.compute_fpfh_feature(keypoints_target,
     o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=20))
     
+        
+    t_feature = time.time()
+    print(':: the time elapsed for feature detection and description')
+    print((time.time() - t_cal_distance)*1000)
+    
     # ## ransac ICP with FPFH descriptor
     result_ransac = execute_global_registration(keypoints_source, keypoints_target,
                                             source_fpfh, target_fpfh,
                                             voxel)
+    
+        
+    t_ransac = time.time()
+    print(':: the time elapsed for ransac global registration')
+    print((time.time() - t_feature)*1000)
+    
     
     # print the fitness and rmse metrics with open3d.pipelines.registration.TransformationEstimationPointToPlane
     loss = o3d.pipelines.registration.HuberLoss(k=voxel*2)
@@ -286,14 +312,29 @@ for i in range(num_iter):
         o3d.pipelines.registration.TransformationEstimationPointToPlane(loss),
         o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=300))
     
+        
+    t_refinement = time.time()
+    print(':: the time elapsed for registration refinement')
+    print((time.time() - t_ransac)*1000)
     
-    print('calculate the distance after the ICP registration, the distance is:')
+    
+    
+    t_elapsed = (time.time() - t_start ) * 1000
+    
+    print(':: calculate the distance after the ICP registration, the distance is:')
     cl_source.transform(icp_fine.transformation)
     dist_source_target_after = cl_source.compute_point_cloud_distance(cl_target)
     np_dist_after = np.asarray(dist_source_target_after)
+    print(np.mean(np_dist_after[np_dist_after<1]))
+    
+    t_cal_distance_after = time.time()
+    print(':: the time elapsed for distance calculation after the registration')
+    print((time.time() - t_refinement)*1000)
+    
+    
     mean_dist_after.append(np.mean(np_dist_after))
     dist_after.append(np_dist_after)
-    
+    inference_time.append(t_elapsed)
     
     # print('the fitness is:')
     # print(icp_fine.fitness)
@@ -309,15 +350,26 @@ for i in range(num_iter):
 # plt.ylabel("fitness value")  
 # plt.xlabel('time index')  
 # plt.show()
+####################################################distance calculation##################
+# fig, ax = plt.subplots()  # Create a figure and an axes.
+# ax.plot(time_index, mean_dist_before, label='dist_before')  # Plot some data on the axes.
+# ax.plot(time_index, mean_dist_after, label='dist_after')   # Plot more data on the axes...
+#  # ... and some more.
+# ax.set_xlabel('time index')  # Add an x-label to the axes.
+# ax.set_ylabel('mean distance')  # Add a y-label to the axes.
+# ax.set_title("Registration distance plot")  # Add a title to the axes.
+# ax.legend()  # Add a legend.  
+#########################################################################################
+##  inference time
 
-fig, ax = plt.subplots()  # Create a figure and an axes.
-ax.plot(time_index, mean_dist_before, label='dist_before')  # Plot some data on the axes.
-ax.plot(time_index, mean_dist_after, label='dist_after')   # Plot more data on the axes...
- # ... and some more.
-ax.set_xlabel('time index')  # Add an x-label to the axes.
-ax.set_ylabel('mean distance')  # Add a y-label to the axes.
-ax.set_title("Registration distance plot")  # Add a title to the axes.
-ax.legend()  # Add a legend.  
+# plt.plot(time_index, inference_time)  
+# plt.ylabel("inference_time")  
+# plt.xlabel('time index')  
+# plt.show() 
+
+#########################################################
+
+
 
 # plt.hist(dist_after[1][dist_after[1] < 1], bins = 1000)
 # plt.hist(dist_before[1][dist_before[1] < 1], bins = 1000)
@@ -338,7 +390,7 @@ ax.legend()  # Add a legend.
     # draw_registration_result(keypoints_source, keypoints_target, result_ransac.transformation)
     
     ###################################################################################
-   
+    ############# Task board ######################################################
     ### remove ground points, see the results-> done
     ### see the simple pairwise_registration overlapping results -> done
     ## fix the initial value problem -> done
@@ -355,13 +407,15 @@ ax.legend()  # Add a legend.
     ## draw the pipelines first on paper, then with geogebra
     ## see the paper in IEEE signal processing magzine
     
-    ## test with challenging sequences with moving objects in the scene
+    ## test with challenging sequences with moving objects in the scene -> kitti odometry dataset -> semantic  kitti
     ## open3d.registration.CorrespondenceChecker
     ## make the comparison of ground points existence 
     ## -> show the registration lag effect with specific metrics
-    ## increase the ICP estimation efficiency
+    ## increase the ICP estimation efficiency -> tried but failed
+    ## ## registration_ransac_based_on_feature_matching -> calculate the elapsed time done
+    ## ## registration_fast_based_on_feature_matching -> calculate the elapsed time done
     
-    ##################################################################################
+    ######################################################################################
    
     # cl_target.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius= voxel*2, max_nn=30))
     # print('last pose is')
