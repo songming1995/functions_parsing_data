@@ -1,0 +1,356 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Dec  9 10:27:34 2021
+
+@author: songming
+"""
+
+## pose graph based reconstruction VLP ECN campus :) -> plot the pose frame on the reconstruction scene 
+
+## ground detection -> ok later to camera frame projection with intrinsic parameters
+
+## object clustering for VLP-16
+
+## uncertainty evaluation!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+## direct and feature based ICP comparison-> key points -> fitness and rmse (ICP residuals) metrics
+
+## refer to RAL paper citation format, plot the overview of the paper with geogebra (refer to direct and feature-based visual slam)
+## check kitti_object_vis github package, check the  IEEE sensor journal fusion paper
+
+##complex yolo bounding box extraction, benchmark with the semantic kitti dataset, run loam, aloam with kitti, scene reconstruction
+# fitness value as the adaptive threshold of bounding box outlier rejection - > proporation of outliers in the bounding box 
+
+
+# read and copy -> # Integrate Point-Cloud Segmentation with 3D LiDAR Scan-Matching for Mobile Robot Localization and Mapping
+# motivation for ground points segmentation
+
+## project the ground points to the image plane!!!!!!!!!!!!!!!!!!!!!!!!!!!
+## reproduce the ransac icp biased estimation!!!!!!!!!!!!!
+## comparison of direct and feature based methods, refer to the slide comparison part
+
+## Intrinsic Shape Signatures: A Shape Descriptor for 3D Object Recognition
+## Performance Evaluation of 3D Keypoint Detectors -> to be checked for writing the paper
+
+## superimpose the pose frame in the scene reconstruction
+
+## clustering based object detection, low-resolution lidar object detection
+
+## monocular depth completion with lidar, back projection to the lidar frame
+
+## bounding box conversion from complex yolo and SFA3D to open3d format!!!!!
+
+# import open3d as o3d
+
+# pcd = o3d.io.read_point_cloud("/home/songming/XYZ/100.txt", format='xyz')
+# o3d.visualization.draw_geometries([pcd],
+#                                   zoom=0.175,
+#                                   front=[ -0.64264410656652293, -0.65200905363026951, 0.40235897688441846 ],
+#                                   lookat=[ 1.9892000000000001, 2.0207999999999999, 1.8945000000000001 ],
+#                                   up=[ 0.34201846275438874, 0.22579518642047891, 0.91216221415078702 ])
+
+####################################### TO DO LIST ###########################################################################
+# plot pose on the graph -> done
+
+# test uncertainty accuracy -> pair-wise registration and global registration
+
+# open3d desktop pose graph -> run with kitti, ls2n dataset 
+
+# writing semi-direct paper
+
+# yolo-complex bounding box saving and rendering (projection)
+
+# geometric clustering, https://github.com/AlexGeControl/3D-Point-Cloud-Analytics/tree/master/workspace/assignments
+
+
+
+
+##############################################################################################################################
+
+## Step 1. Make fragments: build local geometric surfaces from single LiDAR scan. 
+
+## how to create fragments (local geometric surfaces with Alpha shapes) from the LiDAR scan??
+
+# Step 2. Register fragments: the fragments are aligned in a global space. This part uses pose graph based Global registration.
+
+
+# Step 3. Refine registration: the rough alignments are aligned more tightly. This part uses pose graph optimization. 
+
+# 
+# Step 4. Integrate scene: integrate the LiDAR scan with the respective pose in the graph.
+
+import open3d as o3d
+import numpy as np
+import copy
+
+voxel_size = 0.2
+
+
+def remove_ground(o3d_pcd):
+    
+    ##The two key arguments radius = 0.1 and max_nn = 30 specifies search radius and maximum nearest neighbor. 
+    ##It has 10cm of search radius, and only considers up to 30 neighbors to save computation time.
+    
+    
+    points = np.asarray(o3d_pcd.points)
+    
+    o3d_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=5.0, max_nn=10))
+    
+    normals = np.asarray(o3d_pcd.normals)
+   
+    angular_distance_to_z = np.abs(normals[:, 2])
+    
+    # angles range along the vertical axis (0, pi/6) normal direction constraint
+    
+    idx_downsampled = angular_distance_to_z > np.cos(np.pi/5) 
+    
+    idx_points = points[:, 2] < -1.4
+    
+    idx_2 = np.logical_and(idx_downsampled, idx_points)
+    
+    idx_2_not = np.logical_not(idx_2)
+    
+    ground_points = points[idx_2]
+    
+    up_points = points[idx_2_not] 
+        
+    o3d_ground_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(ground_points))
+    
+    # o3d_up_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(up_points))
+    ## increase the distance to incorporate more ground points
+    plane_model, inliers = o3d_ground_cloud.segment_plane(distance_threshold=0.3,
+                                      ransac_n=3,
+                                      num_iterations=30)
+    # [a, b, c, d] = plane_model
+    # print(f" Ground plane equation: {a:.2f}x + {b:.2f}y + {c:.2f}z + {d:.2f} = 0")
+    
+    ground_cloud = o3d_ground_cloud.select_by_index(inliers)
+    ground_cloud.paint_uniform_color([1.0, 0, 0])
+    
+    ground_outlier_cloud =  o3d_ground_cloud.select_by_index(inliers, True)
+    
+    # ground_outlier.paint_uniform_color([0,0,1])
+    
+    # o3d_up_points.paint_uniform_color([0,0,1])
+    
+    ground_outlier_points = np.asarray(ground_outlier_cloud.points)
+    
+    ground_free_points = np.concatenate((ground_outlier_points,up_points), axis=0)
+    
+    ground_free_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(ground_free_points))
+    
+    return ground_free_cloud
+    
+    # ground_free_cloud.paint_uniform_color([0,0,1])
+#####################################################################
+
+
+def load_point_clouds(voxel_size):
+    pcds = []
+    for i in range(1700,1800):
+        
+    ##################################ls2n_dataset#################################################################
+        pcd = o3d.io.read_point_cloud("/home/songming/Desktop/ls2n_dataset/2020-10-12-16-38-45/%d.txt"%i, format='xyz')
+        #2020-10-12-16-38-45
+        #2020-10-14-13-45-22
+        #2020-10-15-12-09-39
+        #2020-10-14-13-50-08
+        # print("/home/songming/velodyne_points/data/%010d.bin"%i)
+        
+    ####################################################KITTI######################################################### 
+ 
+    
+        # bin_pcd = np.fromfile("/home/songming/Desktop/dataset/velodyne/sequences/05/velodyne/%06d.bin"%i, dtype=np.float32)
+        # # bin_pcd = np.fromfile("/home/songming/velodyne_points/data/%010d.bin"%i, dtype=np.float32)
+        # points = bin_pcd.reshape((-1, 4))[:, 0:3]  
+        # pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
+        
+        gf_pcd = remove_ground(pcd)
+        pcd_down = gf_pcd.voxel_down_sample(voxel_size=voxel_size)     
+        pcds.append(pcd_down)
+        
+    return pcds
+
+
+
+def pairwise_registration(source, target, voxel_size):
+    
+    max_correspondence_distance_coarse = voxel_size * 15
+    max_correspondence_distance_fine = voxel_size * 1.5
+    
+    target.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius= voxel_size*2, max_nn=30))
+    
+    print("Apply point-to-plane ICP")
+    icp_coarse = o3d.pipelines.registration.registration_icp(
+        source, target, max_correspondence_distance_coarse, np.identity(4),
+        o3d.pipelines.registration.TransformationEstimationPointToPlane())
+    
+    icp_fine = o3d.pipelines.registration.registration_icp(
+        source, target, max_correspondence_distance_fine,
+        icp_coarse.transformation,
+        o3d.pipelines.registration.TransformationEstimationPointToPlane())
+    
+    transformation_icp = icp_fine.transformation
+    
+    information_icp = o3d.pipelines.registration.get_information_matrix_from_point_clouds(
+        source, target, max_correspondence_distance_fine,
+        icp_fine.transformation)
+    
+    return transformation_icp, information_icp
+
+def full_registration(pcds):
+    pose_graph = o3d.pipelines.registration.PoseGraph()
+    odometry = np.identity(4)
+    pose_graph.nodes.append(o3d.pipelines.registration.PoseGraphNode(odometry))
+    n_pcds = len(pcds)
+    for source_id in range(n_pcds):
+        for target_id in range(source_id + 1, n_pcds):
+            transformation_icp, information_icp = pairwise_registration(
+                pcds[source_id], pcds[target_id],voxel_size)
+            print("Build o3d.registration.PoseGraph")
+            if target_id == source_id + 1:  # odometry case
+                odometry = np.dot(transformation_icp, odometry)
+                pose_graph.nodes.append(
+                    o3d.pipelines.registration.PoseGraphNode(np.linalg.inv(odometry)))
+                pose_graph.edges.append(
+                    o3d.pipelines.registration.PoseGraphEdge(source_id,
+                                                   target_id,
+                                                   transformation_icp,
+                                                   information_icp,
+                                                   uncertain=False))
+            else:  # loop closure case
+                pose_graph.edges.append(
+                    o3d.pipelines.registration.PoseGraphEdge(source_id,
+                                                   target_id,
+                                                   transformation_icp,
+                                                   information_icp,
+                                                   uncertain=True))
+    return pose_graph
+
+
+
+
+pcds_down = load_point_clouds(voxel_size)
+print("Point clouds visualization before the pose graph...")
+o3d.visualization.draw_geometries(pcds_down,
+                                  zoom=0.3612,
+                                  front=[0.0274, -0.4184, 0.9078],
+                                  lookat=[2.6172, 2.0475, 1.532],
+                                  up=[-0.0897, 0.9034, 0.4192])
+
+print("Full registration ...")
+with o3d.utility.VerbosityContextManager(
+        o3d.utility.VerbosityLevel.Debug) as cm:
+    pose_graph = full_registration(pcds_down)
+    
+print("Optimizing PoseGraph ...")
+option = o3d.pipelines.registration.GlobalOptimizationOption(
+    max_correspondence_distance=voxel_size*1.5,
+    edge_prune_threshold=0.25,
+    reference_node=0)
+
+with o3d.utility.VerbosityContextManager(
+        o3d.utility.VerbosityLevel.Debug) as cm:
+    o3d.pipelines.registration.global_optimization(
+        pose_graph,
+        o3d.pipelines.registration.GlobalOptimizationLevenbergMarquardt(),
+        o3d.pipelines.registration.GlobalOptimizationConvergenceCriteria(),
+        option)
+    
+print("Transform points and display")
+
+pcds_down_temp = copy.deepcopy(pcds_down)
+# pcd_combined = o3d.geometry.PointCloud()
+mesh = o3d.geometry.TriangleMesh.create_coordinate_frame(size=3)
+mesh_list = []
+
+
+for point_id in range(len(pcds_down)):
+    
+    print(pose_graph.nodes[point_id].pose)
+    
+    pcds_down[point_id].transform(pose_graph.nodes[point_id].pose)
+    
+    mesh_t = copy.deepcopy(mesh).transform(pose_graph.nodes[point_id].pose)
+    mesh_list.append(mesh_t)
+    
+    # pcd_combined += pcds_down_temp[point_id].transform(pose_graph.nodes[point_id].pose)
+
+o3d.visualization.draw_geometries(mesh_list + pcds_down,
+                                  zoom=0.3612,
+                                  front=[0.0274, -0.4184, 0.9078],
+                                  lookat=[2.6172, 2.0475, 1.532],
+                                  up=[-0.0897, 0.9034, 0.4192])
+# alpha = 0.2
+# print(f"alpha={alpha:.3f}")
+# mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_alpha_shape(
+#     pcd_combined, alpha)
+# mesh.compute_vertex_normals()
+# o3d.visualization.draw_geometries([mesh], mesh_show_back_face=True)
+
+
+####################test part################################################
+# def draw_registration_result(source, target, transformation):
+#     source_temp = copy.deepcopy(source)
+#     target_temp = copy.deepcopy(target)
+#     source_temp.paint_uniform_color([1, 0.706, 0])
+#     target_temp.paint_uniform_color([0, 0.651, 0.929])
+#     source_temp.transform(transformation)
+#     o3d.visualization.draw_geometries([source_temp, target_temp])
+    
+    
+# i =3
+# bin_pcd = np.fromfile("/home/songming/velodyne_points/data/%010d.bin"%i, dtype=np.float32)
+# bin_pcd_f = np.fromfile("/home/songming/velodyne_points/data/%010d.bin"%(i+1), dtype=np.float32)
+
+# points = bin_pcd.reshape((-1, 4))[:, 0:3]
+# points_f = bin_pcd_f.reshape((-1, 4))[:, 0:3]
+
+
+# o3d_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
+
+# pcd_down = o3d_pcd.voxel_down_sample(0.1)
+# pcd_down.estimate_normals( search_param=o3d.geometry.KDTreeSearchParamHybrid(radius= 0.1*2, max_nn=30))
+
+
+# o3d_pcd_f = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points_f))
+    
+
+# o3d.visualization.draw_geometries([o3d_pcd])
+##############################Alpha shapes###############################
+# alpha = 0.1
+# print(f"alpha={alpha:.3f}")
+# mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_alpha_shape(
+#     o3d_pcd, alpha)
+# mesh.compute_vertex_normals()
+# o3d.visualization.draw_geometries([mesh], mesh_show_back_face=True)
+
+###############################Ball pivoting#######################
+
+
+# radii = [0.005, 0.01, 0.02, 0.04]
+# rec_mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(
+#                o3d_pcd, o3d.utility.DoubleVector(radii))
+# o3d.visualization.draw_geometries([o3d_pcd, rec_mesh])
+
+#################Poisson surface reconstruction#########################
+
+# print(o3d_pcd)
+# o3d.visualization.draw_geometries([o3d_pcd], zoom=0.664,
+#                                   front=[-0.4761, -0.4698, -0.7434],
+#                                   lookat=[1.8900, 3.2596, 0.9284],
+#                                   up=[0.2304, -0.8825, 0.4101])
+
+# print('run Poisson surface reconstruction')
+# with o3d.utility.VerbosityContextManager(o3d.utility.VerbosityLevel.Debug) as cm:
+#     mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pcd_down, depth=20)
+# print(mesh)
+# o3d.visualization.draw_geometries([mesh], zoom=0.664,
+#                                   front=[-0.4761, -0.4698, -0.7434],
+#                                   lookat=[1.8900, 3.2596, 0.9284],
+#                                   up=[0.2304, -0.8825, 0.4101])
+
+
+#####################################################################################################################
+
