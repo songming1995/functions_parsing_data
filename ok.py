@@ -252,7 +252,7 @@ for k in range(0,len(image_list)-1):
                   
         prob_moving = 1 - sum(mask_movable[0:len(obj_corners2)])/len(obj_corners2)
 
-        if prob_moving > 0.2:               
+        if prob_moving > 0.6:               
             # plot the moving object in red
             c1_r, c2_r = (coor[1], coor[0]), (coor[3], coor[2])
             cv2.rectangle(img2, c1_r, c2_r, (0,0,255), 1)                                                                
